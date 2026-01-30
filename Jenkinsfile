@@ -39,6 +39,17 @@ pipeline {
         }
       }
     }
+stage('GCP Auth') {
+  steps {
+    withCredentials([file(credentialsId: 'gcp-key', variable: 'KEY')]) {
+      sh '''
+        gcloud auth activate-service-account --key-file=$KEY
+        gcloud config set project $PROJECT_ID
+        gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      '''
+    }
+  }
+}
 
     stage('Build Image') {
       steps {
@@ -51,6 +62,14 @@ pipeline {
         sh "docker push $IMAGE"
       }
     }
+stage('Prod Approval') {
+  when {
+    branch 'main'
+  }
+  steps {
+    input message: 'Approve Production Deployment?'
+  }
+}
 
     stage('Deploy To Cloud Run') {
       steps {
