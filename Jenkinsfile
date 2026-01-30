@@ -4,7 +4,7 @@ pipeline {
 
   environment {
     PROJECT_ID = "neat-pagoda-477804-m8"
-    REGION = "asia-south1"
+    REGION = "us-central1"
   }
 
   stages {
@@ -19,6 +19,16 @@ pipeline {
       steps {
         script {
 
+          // ---------- PR BUILD HANDLING ----------
+          if (env.CHANGE_ID) {
+            echo "Pull Request Build Detected - Skipping Deployment Mapping"
+            env.ENV = "pr"
+            env.SERVICE = "skip"
+            env.IMAGE = "skip"
+            return
+          }
+
+          // ---------- BRANCH MAPPING ----------
           if (env.BRANCH_NAME == 'dev') {
             env.ENV = 'dev'
             env.SERVICE = 'backend-dev'
@@ -32,7 +42,7 @@ pipeline {
             env.SERVICE = 'backend-prod'
           }
           else {
-            error("Unsupported branch")
+            error("Unsupported branch: " + env.BRANCH_NAME)
           }
 
           env.IMAGE = "us-central1-docker.pkg.dev/${PROJECT_ID}/myrepo/backend-${ENV}"
@@ -40,19 +50,52 @@ pipeline {
       }
     }
 
+    stage('GCP Auth') {
+      when {
+        not { changeRequest() }
+      }
+      steps {
+        withCredentials([file(credentialsId: 'gcp-key', variable: 'KEY')]) {
+          sh '''
+            gcloud auth activate-service-account --key-file=$KEY
+            gcloud config set project $PROJECT_ID
+            gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          '''
+        }
+      }
+    }
+
     stage('Build Image') {
+      when {
+        not { changeRequest() }
+      }
       steps {
         sh "docker build -t $IMAGE ."
       }
     }
 
     stage('Push Image') {
+      when {
+        not { changeRequest() }
+      }
       steps {
         sh "docker push $IMAGE"
       }
     }
 
+    stage('Prod Approval') {
+      when {
+        branch 'main'
+      }
+      steps {
+        input message: 'Approve Production Deployment?'
+      }
+    }
+
     stage('Deploy To Cloud Run') {
+      when {
+        not { changeRequest() }
+      }
       steps {
         sh """
         gcloud run deploy $SERVICE \
